@@ -1,0 +1,686 @@
+---
+title: "DGE_EEG_exp_eeg_analyses - EffortTask single trial - Power vs RT"
+author: "Davide Gheza"
+date: "06 February 2019"
+output:
+  html_document:
+    code_folding: hide
+  word_document: default
+  pdf_document: default
+encoding: UTF-8
+---
+
+```{r, SETTINGS-knitr, include=FALSE}
+stopifnot(require(knitr))
+options(width = 180)
+opts_chunk$set(
+  cache = TRUE,
+  comment = NA,
+  message = FALSE,
+  warning = FALSE
+)
+```
+
+Load required packages:
+```{r, cache=FALSE}
+
+if (!require("brms")) install.packages("brms")
+library(brms)
+theme_set(theme_default())
+
+if (!require("tidyverse")) install.packages("tidyverse")
+library(tidyverse)
+
+if (!require("BEST")) install.packages("BEST")
+library(BEST)
+
+if (!require("ggplot2")) install.packages("ggplot2")
+library(ggplot2)
+
+if (!require("ggridges")) install.packages("ggridges")
+library(ggridges)
+
+```
+
+# Load data 50% reward probability, single trial, with time structure
+This data comes from a reinfocement learning experiment. Subjects were instructed to learn, by trials and error, the stimulus-response association in 3 conditions: 100% (deterministic S-R), 80% (probabilistic), 50% (random). In each trial they saw a stimulus and they had to press 1 out of 2 possible buttons. They received a FB indicating the outcome (positive or negative). This experiment included two consecutive blocks of this task, adopting different stimuli (learning started from scratch in the first and second block). The trials belonging to the 3 conditions were intermixed, but here we selected only the random (50%) condition (where learning was made impossible by design, and thus there is a balanced amount of pos and neg FB). In this condition we expect an effect of time (slope) on FMT power, reflecting de-motivation (reduced cognitive control) in processing/exploring the FB. This data refer to "event related spectral perturbation" in the theta band (3-7Hz; FMT power, in dB) during the FB event. 
+
+After single-trial time/frequency decomposition and baseline normalization, for each accuracy condition (correct and incorrect FB) and task block (1st and 2nd), each single FB was combined with the time information, so that each single-trial FMT power was associated with the amount of time (rounded to seconds) elapsed from the beginning of each task block.
+
+There were 2 theoretical approach to model this data: 
+1) consider the (simple) order of the single FB presentation
+2) consider the exact time of the single FB presentation
+We chose the second, to improve the accuracy of the model (although in principle this equals to assuming a FB for each time point (second), and a lot of missing data). 
+
+Factors: group (HC vs MDD), accuracy (positive vs negative)
+
+Continuous variable: time (sec)
+
+not modelled factor -> block (1 vs 2)
+
+This analysis aims to check whether the 2 groups (HC vs MDD) showed a different decay in FMT across time, and different for correct vs incorrect FB
+
+
+
+# Prepare the data
+
+Load the data:
+```{r}
+rm(list=ls())   # clear all!
+wd <- ("C:/Users/gdavide/Documents/MATLAB/dg_workspace18/DoorGamblingEffort/EEG exp/Analyses/Output")
+setwd(wd) # set work directory
+EffData <- read.csv2("H31_EffortTask_singletrials_pooled_Cz_FCz_Fz_ERSP_3_7_induced_with_RT.csv",header=TRUE,na.strings="NaN") # read data
+
+#head(EffData)
+
+```
+
+Preparation of data we need 
+
+```{r}
+
+# filter out subjects exlcuded: 18, 24
+
+EffData = EffData[!(EffData$sn %in% c(18, 24)),]
+
+EffData = EffData %>%  
+                  mutate(sn = as.factor(EffData$sn))                         # sn variable as factor
+                  #filter(diff == "hard")                                    # (optional) select diff
+
+                  
+EffData = na.omit(EffData)
+
+# prepare conditions for marginal effects
+
+conditions <- make_conditions(EffData, c("diff", "power")) 
+```
+
+# Analyse the data: models definition and fitting
+
+## 1) Fit a null model 
+(varying intercept and slope)
+
+```{r, results="hide"}
+
+# fit_null = readRDS(file = "")
+
+fit_null <- brm(RT ~ 1 + (1 | sn), data = EffData, family = exgaussian(), cores = 8,
+                   control = list(adapt_delta = 0.90))
+
+# saveRDS(fit_null,file = "DGE_efftask_singletrial_FITnull")
+```
+
+```{r, fig.width = 10, fig.height= 10}
+summary(fit_null)
+plot(fit_null, ask = FALSE)
+```
+
+
+Check model fit:
+```{r}
+pp_check(fit_null)
+pp_check(fit_null, "error_scatter_avg")
+```
+
+## 2) Fit a simple model 
+(main effect of power - varying intercept and slope)
+
+```{r, results="hide"}
+
+# fit_compact = readRDS(file = "")
+
+fit_compact <- brm(RT ~ 1 + power + (1 + power | sn), data = EffData, family = exgaussian(), cores = 8,
+                   control = list(adapt_delta = 0.90))
+
+# saveRDS(fit_compact,file = "DGE_efftask_singletrial_FITcompact")
+```
+
+```{r, fig.width = 10, fig.height= 10}
+summary(fit_compact)
+plot(fit_compact, ask = FALSE)
+```
+
+Visualize predictions:
+```{r, include=TRUE}
+plot(marginal_effects(fit_compact), points = TRUE, ask = FALSE)
+```
+
+Check model fit:
+```{r}
+pp_check(fit_compact)
+pp_check(fit_compact, "error_scatter_avg")
+```
+
+## 3) Fit an extended model - power*diff
+(main effects + interaction power and difficulty - varying intercept, main effects + interaction)
+
+```{r, results="hide"}
+
+# fit_powerdiff = readRDS(file = "")
+
+fit_powerdiff <- brm(RT ~ 1 + power*diff + (1 + power*diff | sn), data = EffData, family = exgaussian(), cores = 8,
+                   control = list(adapt_delta = 0.90))
+
+# saveRDS(fit_powerdiff,file = "DGE_efftask_singletrial_FITpowerdiff")
+```
+
+```{r, fig.width = 10, fig.height= 10}
+summary(fit_powerdiff)
+plot(fit_powerdiff, ask = FALSE)
+```
+
+Visualize predictions:
+```{r, include=TRUE}
+plot(marginal_effects(fit_powerdiff), conditions = conditions, points = FALSE, ask = FALSE)
+```
+
+Check model fit:
+```{r}
+pp_check(fit_powerdiff)
+pp_check(fit_powerdiff, "error_scatter_avg")
+```
+
+
+## 4) Fit a simple model - difficulty
+(main effects diff - varying intercept and slope)
+
+```{r, results="hide"}
+
+# fit_diff = readRDS(file = "")
+
+
+ fit_diff <- brm(RT ~ 1 + diff + (1 + diff | sn), data = EffData, family = exgaussian(), cores = 8,
+                 control = list(adapt_delta = 0.90))
+
+# saveRDS(fit_timegroup,file = "DGE_efftask_singletrial_FITdiff")
+```
+
+Summarize results:
+```{r}
+summary(fit_diff)
+plot(fit_diff, ask = FALSE)
+```
+
+Vizualize predictions:
+```{r, include=TRUE}
+plot(marginal_effects(fit_diff), points = FALSE, ask = FALSE)
+```
+
+
+
+
+
+
+```{r, include=FALSE}
+
+me4conditions <- make_conditions(ABN50, c("group")) # "blk" "accuracy"
+
+# re_formula = NULL ensures that group-level effects are included
+me4 <- marginal_effects(fit_timegroup, conditions = me4conditions, 
+                        re_formula = NULL)
+plot(me4, ncol = 6, points = TRUE, ask = FALSE)
+```
+
+### Compute evidence ratio for slope HC vs MDD
+
+```{r, include=FALSE}
+# Proportion of (posterior) probability distribution <0 of the (population level) parameter "time:groupMDDT1"
+# In other terms, the probability that the slope is more negative for mdd 
+# That is, the probability that MDDT1 have a steeper decay of FMT over time compared to HC
+
+post <- posterior_samples(fit_timegroup) # extracting posterior samples
+m4postsmal = mean(post$`b_time:groupMDDT1` < 0) # computing p(beta<0)
+m4postsmal
+
+# ...and now the posterior probability of the complementary cases
+m4posteqbig <- mean(post$`b_time:groupMDDT1` >= 0) # computing p(beta>=0)
+m4posteqbig
+
+Ratio <- m4postsmal / m4posteqbig
+Ratio
+```
+
+Compute fitted values and residuals
+```{r, include=FALSE}
+head(fitted(fit_timegroup))
+head(residuals(fit_timegroup))
+```
+
+Check model fit:
+```{r}
+pp_check(fit_diff)
+pp_check(fit_diff, "error_scatter_avg")
+```
+
+
+## 5) Fit an extended model - time * accuracy + time * group 
+(main effects + interactions of time * accuracy and time * group - varying intercept, main effects + interactions)
+
+```{r, results="hide"}
+
+fit_timeaccuracytimegroup = readRDS(file = "ABN50_singletrial_timeline_accuracy_FITtimeaccuracytimegroup")
+
+#Ladislas: between design: group should not be set as varying effect
+# fit_timeaccuracytimegroup <- brm(power ~ 1 + time*accuracy + group + time:group + (1 + time*accuracy | snG), data = ABN50,
+#                              cores = 8, control = list(adapt_delta = 0.99))
+
+
+# saveRDS(fit_timeaccuracytimegroup,file = "ABN50_singletrial_timeline_accuracy_FITtimeaccuracytimegroup")
+```
+
+Summarize results:
+```{r}
+summary(fit_timeaccuracytimegroup)
+plot(fit_timeaccuracytimegroup, ask = FALSE)
+```
+
+Vizualize predictions:
+```{r, include=FALSE}
+plot(marginal_effects(fit_timeaccuracytimegroup), points = FALSE, ask = FALSE)
+```
+
+```{r, include=FALSE}
+
+# re_formula = NULL ensures that group-level effects are included
+me5 <- marginal_effects(fit_timeaccuracytimegroup, conditions = conditions, 
+                        re_formula = NA)
+plot(me5, ncol = 2, points = FALSE, ask = FALSE)
+```
+
+```{r, fig.height = 7, fig.width = 11}
+
+# playing around to tune ggplot options 
+meconditions <- make_conditions(ABN50, c("accuracy"))                          # condition on accuracy
+me = marginal_effects(fit_timeaccuracytimegroup,
+                      effects = "time:group",                                  # select only time:group
+                      conditions = meconditions,
+                      re_formula = NA)                                         # include random effects or not
+plotme = plot(me, ncol = 2, points = FALSE, ask = FALSE, plot = FALSE          # save output of the plot method
+              ) 
+theme_set(theme_classic())
+plotme
+  
+
+
+```
+
+
+Compute fitted values and residuals
+```{r, include=FALSE}
+head(fitted(fit_timeaccuracytimegroup))
+head(residuals(fit_timeaccuracytimegroup))
+```
+
+Check model fit:
+```{r}
+pp_check(fit_timeaccuracytimegroup)
+pp_check(fit_timeaccuracytimegroup, "error_scatter_avg")
+```
+
+
+
+
+## 6) Fit an extended model - time * accuracy * group 
+(main effects + interactions of time, accuracy and group - varying intercept, main effects + interactions)
+
+```{r, results="hide"}
+
+fit_timeaccuracygroup = readRDS(file = "ABN50_singletrial_timeline_accuracy_FITtimeaccuracygroup")
+
+#Ladislas: between design: group should not be set as varying effect
+# fit_timeaccuracygroup <- brm(power ~ 1 + time*accuracy*group + (1 + time*accuracy | snG), data = ABN50, 
+                             # cores = 8, control = list(adapt_delta = 0.99))
+
+
+# saveRDS(fit_timeaccuracygroup,file = "ABN50_singletrial_timeline_accuracy_FITtimeaccuracygroup")
+```
+
+Summarize results:
+```{r}
+summary(fit_timeaccuracygroup)
+plot(fit_timeaccuracygroup, ask = FALSE)
+```
+
+Vizualize predictions:
+```{r, include=FALSE}
+plot(marginal_effects(fit_timeaccuracygroup), points = FALSE, ask = FALSE)
+```
+
+```{r, results="hide"}
+
+# re_formula = NULL ensures that group-level effects are included
+me4 <- marginal_effects(fit_timeaccuracygroup, conditions = conditions, 
+                        re_formula = NA)
+plot(me4, ncol = 2, points = FALSE, ask = FALSE)
+```
+
+```{r, fig.height = 5, fig.width = 7}
+
+# playing around to tune ggplot options 
+meconditions <- make_conditions(ABN50, c("accuracy"))                          # condition on accuracy
+me = marginal_effects(fit_timeaccuracygroup,
+                      effects = "time:group",                                  # select only time:group
+                      conditions = meconditions,
+                      re_formula = NA)                                         # include random effects or not
+plotme = plot(me, ncol = 2, points = FALSE, ask = FALSE, plot = FALSE          # save output of the plot method
+              ) 
+theme_set(theme_classic())
+plotme
+  
+
+
+```
+
+
+Compute fitted values and residuals
+```{r, include=FALSE}
+head(fitted(fit_timeaccuracygroup))
+head(residuals(fit_timeaccuracygroup))
+```
+
+Check model fit:
+```{r}
+pp_check(fit_timeaccuracygroup)
+pp_check(fit_timeaccuracygroup, "error_scatter_avg")
+```
+
+
+
+
+
+
+
+# Compare the 6 models 
+
+## leave-one-out cross-validation, widely applicable inforation criteria
+
+```{r}
+loo(fit_timeaccuracygroup, fit_timeaccuracytimegroup, fit_timegroup, fit_timeaccuracy, fit_compact, fit_null, cores = 8)
+WAIC(fit_timeaccuracygroup, fit_timeaccuracytimegroup, fit_timegroup, fit_timeaccuracy, fit_compact, fit_null)
+```
+
+## Compute model weights (WAIC)
+
+```{r}
+model_weights(fit_timeaccuracygroup, 
+              fit_timeaccuracytimegroup, 
+              fit_timegroup, 
+              fit_timeaccuracy, 
+              fit_compact,
+              fit_null,
+              weights = "waic")
+```
+
+## Check explained variance (fit to observed data)
+
+```{r}
+bayes_R2(fit_null)
+bayes_R2(fit_compact)
+bayes_R2(fit_timeaccuracy)
+bayes_R2(fit_timegroup)
+bayes_R2(fit_timeaccuracytimegroup)
+bayes_R2(fit_timeaccuracygroup)
+```
+
+
+
+
+
+# hypothesis testing
+
+## Model of interest: #6
+### Build posterior distributions from constant effets for each condition (for: effect of time, power at time=0)
+
+```{r}
+
+post <- posterior_samples(fit_timeaccuracygroup,"^b") # extracting posterior samples for constant (fixed) effects
+
+# build posterior distributions of each condition for SLOPE (effect of time)
+
+slopeHCcorrect = post[["b_time"]]
+
+slopeHCincorrect = post[["b_time"]] + 
+  post[["b_time:accuracyincorrect"]]
+
+slopeMDDcorrect = post[["b_time"]] + 
+  post[["b_time:groupMDDT1"]]
+
+slopeMDDincorrect = post[["b_time"]] + 
+  post[["b_time:groupMDDT1"]] +
+  post[["b_time:accuracyincorrect"]] + 
+  post[["b_time:accuracyincorrect:groupMDDT1"]]
+
+
+
+# build posterior distributions of each condition for INTERCEPT (power at time = 0)
+
+intHCcorrect = post[["b_Intercept"]]
+
+intHCincorrect = post[["b_Intercept"]] + 
+  post[["b_accuracyincorrect"]]
+
+intMDDcorrect = post[["b_Intercept"]] + 
+  post[["b_groupMDDT1"]]
+
+intMDDincorrect = post[["b_Intercept"]] + 
+  post[["b_groupMDDT1"]] +
+  post[["b_accuracyincorrect"]] + 
+  post[["b_accuracyincorrect:groupMDDT1"]]
+
+
+
+
+# create dataframe of posterior distributions of slopes
+
+post.power.slope = c(slopeHCcorrect, slopeHCincorrect, slopeMDDcorrect, slopeMDDincorrect)
+
+post.label.slope = rep(c("HC correct", "HC incorrect", "MDD correct", "MDD incorrect"),  #labels
+                            each = length(post.power.slope)/4)
+
+post.slope = data.frame(post.power.slope,post.label.slope)
+
+
+# create dataframe of posterior distributions of intercepts (time 0)
+
+post.power.int = c(intHCcorrect, intHCincorrect, intMDDcorrect, intMDDincorrect)
+
+post.label.int = rep(c("HC correct", "HC incorrect", "MDD correct", "MDD incorrect"), 
+                          each = length(post.power.int)/4)
+
+post.int = data.frame(post.power.int,post.label.int)
+
+```
+
+### plot posterior distributions and medians (to compare roughly to observed data)
+
+```{r}
+
+# violin plots
+
+post.slope %>%
+  ggplot(aes(x = post.label.slope, y = post.power.slope)) +
+  geom_violin(mapping = NULL, data = NULL, stat = "ydensity",
+              position = "dodge", draw_quantiles = 0.5, trim = TRUE,
+              scale = "area", na.rm = FALSE, show.legend = NA, inherit.aes = TRUE) +
+  # stat_summary(fun.y=mean, geom="point", shape=4, size=5, color="black") +
+  theme(axis.text = element_text(size = 12),
+        axis.title = element_text(size = 14),
+        plot.title = element_text(size = 18)) +
+  labs(title="Temporal decrease", x = "", y = "dB / sec")                       # expression(paste(beta, " Time"))
+
+post.int %>%
+  ggplot(aes(x = post.label.int, y = post.power.int)) +
+  geom_violin(mapping = NULL, data = NULL, stat = "ydensity",
+              position = "dodge", draw_quantiles = 0.5, trim = TRUE,
+              scale = "area", na.rm = FALSE, show.legend = NA, inherit.aes = TRUE) +
+  # stat_summary(fun.y=mean, geom="point", shape=4, size=5, color="black") +
+  theme(axis.text = element_text(size = 12),
+        axis.title = element_text(size = 14),
+        plot.title = element_text(size = 18)) +
+  labs(title="Power at time = 0", x = "", y = "Power (dB)")                      # expression(paste(beta, " Intercept"))
+
+
+# density ridgeline plots
+
+
+
+post.slope %>%
+  ggplot(aes(x = post.power.slope, y = post.label.slope)) +
+  geom_density_ridges2(rel_min_height = 0.005, 
+                       scale = 1.3, 
+                       quantile_lines = TRUE, 
+                       quantiles = c(0.025, 0.5, 0.975), 
+                       alpha = 1,
+                       size = 0.7) +
+  theme(axis.text = element_text(size = 14),
+        axis.title = element_text(size = 14),
+        plot.title = element_text(size = 18)) +
+  labs(title="Temporal decrease", x = "dB / sec", y = "") +                       # expression(paste(beta, " Time"))
+  geom_vline(xintercept = 0, linetype = "dashed", size = 1) +
+  theme_ridges()
+
+post.int %>%
+  ggplot(aes(x = post.power.int, y = post.label.int)) +
+  geom_density_ridges2(rel_min_height = 0.005, 
+                       scale = 1.3, 
+                       quantile_lines = TRUE, 
+                       quantiles = c(0.025, 0.5, 0.975), 
+                       alpha = 1,
+                       size = 0.7) +
+  theme(axis.text = element_text(size = 14),
+        axis.title = element_text(size = 14),
+        plot.title = element_text(size = 18)) +
+  labs(title="Power at time = 0", x = "Power (dB)", y = "") +                      # expression(paste(beta, " Intercept"))
+  geom_vline(xintercept = 0, linetype = "dashed", size = 1) +
+  theme_ridges()
+```
+
+### plot istograms of posterior distribution per condition (package best)
+```{r}
+## slope 
+plotPost(slopeHCcorrect, xlab = "", col = "#b3cde0", showCurve = FALSE, cex = 1, compVal = 0)
+plotPost(slopeHCincorrect, xlab = "", col = "#b3cde0", showCurve = FALSE, cex = 1, compVal = 0)
+plotPost(slopeMDDcorrect, xlab = "", col = "#b3cde0", showCurve = FALSE, cex = 1, compVal = 0)
+plotPost(slopeMDDincorrect, xlab = "", col = "#b3cde0", showCurve = FALSE, cex = 1, compVal = 0)
+
+## intercept 
+plotPost(intHCcorrect, xlab = "", col = "#b3cde0", showCurve = FALSE, cex = 1, compVal = 0)
+plotPost(intHCincorrect, xlab = "", col = "#b3cde0", showCurve = FALSE, cex = 1, compVal = 0)
+plotPost(intMDDcorrect, xlab = "", col = "#b3cde0", showCurve = FALSE, cex = 1, compVal = 0)
+plotPost(intMDDincorrect, xlab = "", col = "#b3cde0", showCurve = FALSE, cex = 1, compVal = 0)
+
+```
+
+### Test some hypotheses on slope (effect of time on FMT power)
+define the posterior probability distribution of slope (temporal decrease) for following contrasts:
+
+```{r}
+### slope MDD correct vs HC correct
+
+slopecorrectDIFF = slopeMDDcorrect - slopeHCcorrect
+
+### slope MDD incorrect vs HC incorrect
+
+slopeincorrectDIFF = slopeMDDincorrect - slopeHCincorrect
+
+
+### difference of difference: MDD incorrect-correct vs HC incorrect-correct 
+
+slopedouoblediff = (slopeMDDincorrect-slopeMDDcorrect)-(slopeHCincorrect-slopeHCcorrect)
+
+# alternative:
+# slopedouoblediff = slopeincorrectDIFF - slopecorrectDIFF
+
+
+```
+
+## plot posterior probability distribution (on the above contrasts)
+
+### slope: MDD correct - HC correct
+EvidenceRatio: p(MDDcorrect < HCcorrect) / p(MDDcorrect > HCcorrect): 80.2/19.8 = 4.05
+
+```{r}
+## slope MDD correct vs HC correct
+plotPost(slopecorrectDIFF, xlab = "", col = "#b3cde0", showCurve = FALSE, cex = 1, compVal = 0)
+
+```
+
+
+
+
+### slope: MDD incorrect - HC incorrect
+EvidenceRatio: p(MDDincorrect < HCincorrect) / p(MDDincorrect > HCincorrect): 97.2/2.8 = 34.71
+
+```{r}
+
+## slope MDD incorrect vs HC incorrect
+plotPost(slopeincorrectDIFF, xlab = "", col = "#b3cde0", showCurve = FALSE, cex = 1, compVal = 0)
+
+```
+
+
+
+
+### slope: MDD (incorrect-correct) - HC (incorrect-correct)
+EvidenceRatio: p(MDDincorrect-correct < HCincorrect-correct) / p(MDDincorrect-correct > HCincorrect-correct): 76.3/23.7 = 3.22
+
+```{r}
+
+## difference of difference: MDD(incorrectVScorrect) - HC(incorrectVScorrect)
+plotPost(slopedouoblediff, xlab = "", col = "#b3cde0", showCurve = FALSE, cex = 1, compVal = 0)
+
+```
+
+
+
+
+
+
+
+
+
+
+# Plot raw data (fit linear regressions)
+
+```{r, fig.height = 5, fig.width = 7}
+
+
+# lm + 95% CI 
+
+EffData %>%
+  ggplot(aes(x = power, y = RT, color=diff)) +
+  # geom_point() +
+  geom_smooth(method=lm, se=TRUE, fullrange=TRUE, aes(fill=diff)) +
+  theme(axis.text = element_text(size = 16),
+        axis.title = element_text(size = 16)) +
+  labs(title="", x = "Power (dB)", y = "RT (sec)") 
+
+ 
+```
+
+
+
+
+# (discard - just to double check)
+
+### Evaluate some hypothesis with Hypothesis function in BRMS
+
+
+## Model 2: time*accuracy
+
+## 1) Posterior probability that the time effect is steeper for incorrect vs correct, across the 2 groups
+```{r, results="hide"}
+# Evid.Ratio is the ratio of P(time:accuracyincorrect < 0) / P(time:accuracyincorrect >= 0)
+(hyp1 <- hypothesis(fit_timeaccuracy, "time:accuracyincorrect < 0"))
+plot(hyp1)
+```
+## Model 4: time*accuracy*group
+
+## 2) Posterior probability that the time effect is steeper for incorrect vs correct in MDD vs HC
+```{r, results="hide"}
+
+# Evid.Ratio is the ratio of P(time:accuracyincorrect:groupMDDT1 < 0) / P(time:accuracyincorrect:groupMDDT1 >= 0)
+(hyp3 <- hypothesis(fit_timeaccuracygroup, "time:accuracyincorrect:groupMDDT1 < 0"))
+plot(hyp3)
+```
+

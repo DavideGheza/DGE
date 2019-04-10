@@ -1,0 +1,349 @@
+---
+title: "DGE_EEG_exp_eeg_analyses"
+author: "Davide Gheza"
+date: "20 november 2018"
+output: pdf_document
+---
+
+```{r setup_environment,echo=FALSE,warning=FALSE,message=FALSE}
+
+# Setup working environment
+# dev.off() # clear plots
+rm(list=ls()) # clear environment
+cat("\014") # clear console
+set.seed(42) # specify seed for RNG and ensure reproducible results
+#load packages and install them if they're not
+if (!require("pacman")) install.packages("pacman")
+pacman::p_load(plyr, reshape2, Rmisc,ggplot2, ez, schoRsch, pastecs, MBESS, BayesFactor, lme4)
+if (!require("gapminder")) install.packages("gapminder")
+if (!require("dplyr")) install.packages("dplyr")
+if (!require("tidyverse")) install.packages("tidyverse")
+if (!require("Hmisc")) install.packages("Hmisc")
+if (!require("BayesFactor")) install.packages("BayesFactor")
+if (!require("reshape")) install.packages("reshape")
+library(gapminder)
+library(dplyr)
+library(tidyverse)
+library(Hmisc)
+library(reshape)
+library(yarrr) # amazing graphs
+
+```
+
+
+
+```{r, echo=FALSE, results="hide"}
+## define EEG component / band: RewP, FMT, Delta, Betagamma, cueFMT, effFBRewP
+#################
+comp = "FMT"
+#################
+
+## Import data
+
+## load Effort Task Ratings from DGE_EEG_exp_behavioral_analyses
+ETR.wide.diff = readRDS(file = "DGE_EEG_exp_behav_ETR")
+## create combined score for ETR, combining difference scores from aangenaam, gedreven and leuk
+# ETR.wide.diff = ETR.wide.diff %>%
+#                 mutate(ETRagl = ETR.wide.diff$`11`-ETR.wide.diff$`12`-ETR.wide.diff$`13`)
+
+wd <- ("C:/Users/gdavide/Documents/MATLAB/dg_workspace18/DoorGamblingEffort/EEG exp/Analyses/Output")
+setwd(wd) # set work directory
+
+if (comp == "RewP") {
+eegdata <- read.csv2("H29_Fb_effort x outcome_Cz_FCz_215_265_RewP.csv",header=TRUE,na.strings="NaN")
+                    } # read data
+if (comp == "FRN") {
+eegdata <- read.csv2("H28_Fb_effort x outcome_FCz_FRN ppp.csv",header=TRUE,na.strings="NaN")
+                    }
+if (comp == "FMT") {
+eegdata <- read.csv2("H29_Fb_effort x outcome_FCz_ERSP_4_8_200_400.csv",header=TRUE,na.strings="NaN")
+                    } # read data
+if (comp == "Delta") {
+eegdata <- read.csv2("H29_Fb_effort x outcome_CPzCP1CP2CP3CP4_ERSP_0.8_3.9_200_400.csv",
+                     header=TRUE,na.strings="NaN")
+                      }# read data
+if (comp == "Betagamma") {
+eegdata <- read.csv2("H29_Fb_effort x outcome_FCzFzFC1FC2_ERSP_20_35_250_350.csv",
+                     header=TRUE,na.strings="NaN")
+                          }# read data
+if (comp == "cueFMT") {
+eegdata <- read.csv2("H29_cue_FCz_ERSP_4_8_200_400.csv",header=TRUE,na.strings="NaN")
+                      } # read data
+if (comp == "effFBRewP") {
+eegdata <- read.csv2("H29_effFb_CORRECT_Cz_FCz_215_265_RewP.csv",header=TRUE,na.strings="NaN")
+                          } # read data
+if (comp == "efftaskFMT") {
+eegdata <- read.csv2("H29_efftask_CORRECT_FCz_ERSP_3_7_200_600.csv",header=TRUE,na.strings="NaN")
+                          } # read data
+
+# combine EEG and behavioral data
+eegdata = cbind(eegdata, ETR.wide.diff[,10:13])
+
+# rename subject column
+names(eegdata)[names(eegdata) == "X"] = "Subject"
+
+
+## filter out subjects preferring hard vs easy effort task (on top of exlcuded 18, 24)
+# eegdata = eegdata[!(eegdata$Subject %in% c(4, 5, 9, 10, 12, 26)),]
+
+
+if (any(comp == c("RewP", "FMT", "Delta", "Betagamma"))) {
+# long format: difficulty x outcome as condition
+eegdata = gather(eegdata, key = "condition", value = "amplitude", ER:HnR)
+
+
+# Subject as factor
+eegdata$Subject = as.factor(eegdata$Subject)
+
+# create factor outcome
+eegdata$outcome[(eegdata$condition %in% c("ER","HR"))] = "reward"
+eegdata$outcome[(eegdata$condition %in% c("EnR","HnR"))] = "noreward"
+
+eegdata$outcome = as.factor(eegdata$outcome)
+
+# create factor difficultylevel
+eegdata$difficulty[(eegdata$condition %in% c("ER","EnR"))] = "easy"
+eegdata$difficulty[(eegdata$condition %in% c("HR","HnR"))] = "hard"
+
+eegdata$difficulty = factor(eegdata$difficulty,
+                        levels = c("easy", "hard"))
+
+}
+
+
+
+if (any(comp == c("cueFMT", "effFBRewP", "efftaskFMT"))) {
+# long format: difficulty x outcome as condition
+eegdata = gather(eegdata, key = "condition", value = "amplitude", E:H)
+
+# Subject as factor
+eegdata$Subject = as.factor(eegdata$Subject)
+
+# create factor difficultylevel
+eegdata$difficulty[(eegdata$condition %in% "E")] = "easy"
+eegdata$difficulty[(eegdata$condition %in% "H")] = "hard"
+
+eegdata$difficulty = factor(eegdata$difficulty,
+                        levels = c("easy", "hard"))
+  }
+```
+# plot
+
+```{r}
+if (any(comp == c("RewP", "FMT", "Delta", "Betagamma"))) {
+
+eegdata %>%
+  ggplot(aes(x = condition, y = amplitude)) +
+  geom_point() +
+  geom_violin(mapping = NULL, data = NULL, stat = "ydensity",
+              position = "dodge", draw_quantiles = NULL, trim = TRUE,
+              scale = "area", na.rm = FALSE, show.legend = NA, inherit.aes = TRUE) +
+  stat_summary(fun.y=mean, geom="point", shape=4, size=10, color="black") +
+  geom_jitter(shape=16, position=position_jitter(0.02), size=2) +
+  theme(axis.text = element_text(size = 16),
+        axis.title = element_text(size = 16))
+
+eegdata %>%
+  ggplot(aes(x = difficulty, y = amplitude, color = outcome)) +
+  geom_boxplot() +
+  theme(axis.text = element_text(size = 16),
+        axis.title = element_text(size = 16))
+
+eegdata %>%
+  ggplot(aes(x = condition, y = amplitude, fill=outcome)) +
+  geom_boxplot() +
+  scale_fill_grey(start=0.8, end=0.5, labels = c("noreward", "reward")) + 
+  theme_classic() +
+  scale_x_discrete(breaks=c("ER", "HR", "EnR", "HnR"),
+                  labels=c("ER", "HR", "EnR", "HnR")) + 
+  stat_summary(fun.y=mean, 
+               geom="point", 
+               shape=23, 
+               size=3, 
+               color="black", 
+               fill="white") +
+  stat_summary(fun.data = mean_cl_boot,
+               geom = "errorbar",
+               width = 0.3,
+               size = 1,
+               color = "black") +
+  theme(axis.text = element_text(size = 14),
+        axis.title = element_text(size = 16),
+        plot.title = element_text(size = 16),
+        legend.title = element_text(size=14),
+        legend.text = element_text(size=14)) +
+  labs(title="FB", x = "", y = expression(paste("Amplitude (", mu,"V)"))) 
+  # labs(title="FB", x = "", y = "Power (dB)") 
+
+eegdata %>%
+  ggplot(aes(x = Daangenam, y = amplitude, color=condition)) +
+  geom_point() +
+  geom_smooth(method=lm, se=FALSE, fullrange=TRUE, aes(fill=condition)) +
+  theme(axis.text = element_text(size = 16),
+        axis.title = element_text(size = 16),
+        legend.title = element_text(size=14),
+        legend.text = element_text(size=14),
+        plot.title = element_text(size = 16)) +
+  labs(title="D aangenaam vs. ERP amplutde", x = "d anngenam", y = "ERP amplitude")
+
+# Pirateplot graph
+pirateplot(formula=amplitude~difficulty+outcome, # dependent~independent variables
+           data=eegdata, # data frame
+           main="", # main title
+           xlim=NULL, # x-axis: limits
+           xlab="",  # x-axis: label
+           ylim=c(-5,10), # y-axis: limits
+           # ylab=expression(paste("amplitude (",mu,"V)")), # y-axis: label
+           ylab=expression(paste("Power (dB)")), # y-axis: label
+           inf.method="hdi", # type of inference: 95% Bayesian Highest Density Interval (HDI)
+           hdi.iter=5000, # number of iterations for 95% HDI
+           cap.beans=TRUE, # max and min values of bean densities are capped at the limits found in the data
+           pal="google") # color palette [see piratepal(palette="all")]
+
+}
+```
+
+# stats
+
+```{r}
+if (any(comp == c("RewP", "FMT", "Delta", "Betagamma"))) {
+
+# standard anova (Ez)
+
+ezANOVA(data=eegdata,dv=.(amplitude),wid=.(Subject),within=.(outcome, difficulty),detailed=TRUE,type=3)
+  
+}
+```
+
+```{r}
+if (any(comp == c("RewP", "FMT", "Delta", "Betagamma"))) {
+
+# mixed model anova (lmer) - random intercept and slopes (n.b. can't compute random interactions)
+
+m.null = lmer(amplitude ~ 1 + (1|Subject), data=eegdata, REML = FALSE)
+m.outcome = lmer(amplitude ~ outcome + (1 + outcome|Subject), data=eegdata, REML = FALSE)
+m.difficulty = lmer(amplitude ~ difficulty + (1 + difficulty|Subject), data=eegdata, REML = FALSE)
+m.maineffects = lmer(amplitude ~ outcome + difficulty + (1 + outcome + difficulty|Subject), data=eegdata, REML = FALSE)
+m.interaction = lmer(amplitude ~ outcome * difficulty + (1 + outcome + difficulty|Subject), data=eegdata, REML = FALSE)
+
+anova(m.null, m.outcome, m.difficulty, m.maineffects, m.interaction)
+
+# anova(m.null, m.outcome)
+# anova(m.outcome, m.maineffects)
+# anova(m.difficulty, m.maineffects)
+# anova(m.maineffects, m.interaction)
+# 
+# coef(m.maineffects)
+
+}
+```
+
+
+```{r}
+if (any(comp == c("RewP", "FMT", "Delta", "Betagamma"))) {
+
+########## Bayesian model comparison ##############
+
+library(BayesFactor)
+
+num.iter=10000 # number of MonteCarlo iterations (default: 10000)
+
+
+
+## Specification of random effects (model out the Subject variability on overal amplitude. How to model random slopes?)
+
+# Assuming a medium Cauchy prior d~Cauchy(0,.707):
+m.null=lmBF(amplitude ~ 1 + Subject,
+            data=eegdata,iterations=num.iter,whichRandom="Subject",
+            rscaleRandom="nuisance",rscaleFixed=.707)
+m.outcome=lmBF(amplitude ~ Subject + outcome,
+               data=eegdata,iterations=num.iter,whichRandom="Subject",
+               rscaleRandom="nuisance",rscaleFixed=.707)
+m.difficulty=lmBF(amplitude ~ Subject + difficulty,
+              data=eegdata,iterations=num.iter,whichRandom="Subject",
+              rscaleRandom="nuisance",rscaleFixed=.707)
+m.maineffects=lmBF(amplitude ~ Subject + outcome + difficulty,
+                   data=eegdata,iterations=num.iter,whichRandom="Subject",
+                   rscaleRandom="nuisance",rscaleFixed=.707)
+m.interaction=lmBF(amplitude ~ Subject + outcome * difficulty,
+                   data=eegdata,iterations=num.iter,whichRandom="Subject",
+                   rscaleRandom="nuisance",rscaleFixed=.707)
+m.interaction.cov=lmBF(amplitude ~ Subject + outcome + difficulty + outcome:difficulty:Dgedreven,
+                   data=eegdata,iterations=num.iter,whichRandom="Subject",
+                   rscaleRandom="nuisance",rscaleFixed=.707)
+
+# same as lmBF
+
+BFeeg = anovaBF(amplitude~outcome*difficulty + Subject, data=eegdata, whichRandom="Subject")
+BFeeg
+
+}
+```
+
+BF model x | null
+
+```{r}
+if (any(comp == c("RewP", "FMT", "Delta", "Betagamma"))) {
+
+m.outcome/m.null
+m.difficulty/m.null
+m.maineffects/m.null
+m.interaction/m.null
+m.interaction.cov/m.null
+
+}
+```
+BF model x | model y
+
+```{r}
+if (any(comp == c("RewP", "FMT", "Delta", "Betagamma"))) {
+
+m.interaction.cov/m.interaction
+m.interaction.cov/m.maineffects
+m.interaction/m.maineffects
+m.interaction/m.difficulty
+m.interaction/m.outcome
+m.interaction/m.null
+
+m.outcome/m.maineffects
+m.outcome/m.interaction
+m.maineffects/m.interaction
+
+}
+```
+
+# Direction of effects: t-test between outcome or difficulty levels
+
+```{r}
+if (any(comp == c("RewP", "FMT", "Delta", "Betagamma"))) {
+
+# outcome
+bf.outcome = ttestBF(x = eegdata$amplitude[(eegdata$outcome %in% "reward")],
+                    y = eegdata$amplitude[(eegdata$outcome %in% "noreward")],
+                    paired = TRUE, nullInterval = c(0,Inf))
+
+# difficulty level
+bf.difficulty = ttestBF(x = eegdata$amplitude[(eegdata$difficulty %in% "hard")],
+                      y = eegdata$amplitude[(eegdata$difficulty %in% "easy")],
+                      paired = TRUE, nullInterval = c(0,Inf))
+
+bf.outcome
+bf.difficulty
+
+}
+```
+
+# Bayesian t-test for cue and performance FB analyses
+
+```{r}
+if (any(comp == c("cueFMT", "effFBRewP", "efftaskFMT"))) {
+
+# difficulty level
+bf.difficulty = ttestBF(x = eegdata$amplitude[(eegdata$difficulty %in% "hard")],
+                      y = eegdata$amplitude[(eegdata$difficulty %in% "easy")],
+                      paired = TRUE, nullInterval = c(0,Inf))
+
+bf.difficulty
+
+}
+```
